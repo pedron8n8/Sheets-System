@@ -4,7 +4,7 @@ from datetime import date
 from pathlib import Path
 
 import pandas as pd
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from main import processar_registro_por_indice
@@ -158,6 +158,11 @@ def root() -> dict:
             "generated_files": "GET /outputs/{file_name}",
         },
     }
+
+
+@app.head("/")
+def root_head() -> Response:
+    return Response(status_code=200)
 
 
 @app.get("/health")
