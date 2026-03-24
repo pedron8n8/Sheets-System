@@ -5,20 +5,22 @@ from pathlib import Path
 
 import pandas as pd
 from fastapi import FastAPI, HTTPException
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from main import processar_registro_por_indice
 
 ARQUIVO_EXCEL = Path("contatos.xlsx")
+OUTPUT_DIR = Path("Output")
 
 
 class OtherIncomeItem(BaseModel):
-    tipo: str = Field(..., description="Nome/tipo da receita adicional")
-    valor: str = Field(..., description="Valor da receita adicional")
+    tipo: str = Field(..., description="Name/Type of Income Additional")
+    valor: str = Field(..., description="Value of Income Additional")
 
 
 class OtherExpenseItem(BaseModel):
-    tipo: str = Field(..., description="Nome/tipo da despesa adicional")
-    valor: str = Field(..., description="Valor da despesa adicional")
+    tipo: str = Field(..., description="Name/Type of Additional Expense")
+    valor: str = Field(..., description="Value of Additional Expense")
 
 
 class PropertyPayload(BaseModel):
@@ -140,6 +142,10 @@ def _salvar_registro_no_excel(registro: dict) -> tuple[int, int]:
 
 app = FastAPI(title="SheetsForSaim API", version="1.0.0")
 
+# Ensures static route can be mounted even on a fresh deploy.
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+app.mount("/outputs", StaticFiles(directory=str(OUTPUT_DIR)), name="outputs")
+
 
 @app.get("/")
 def root() -> dict:
@@ -149,6 +155,7 @@ def root() -> dict:
             "health": "GET /health",
             "create_property": "POST /properties",
             "create_property_compat": "POST /",
+            "generated_files": "GET /outputs/{file_name}",
         },
     }
 
@@ -166,12 +173,15 @@ def create_property(payload: PropertyPayload) -> dict:
     registro = _montar_registro(payload)
     total_registros, novo_indice = _salvar_registro_no_excel(registro)
     caminho_gerado = processar_registro_por_indice(novo_indice)
+    output_name = Path(caminho_gerado).name if caminho_gerado else ""
+    output_url = f"/outputs/{output_name}" if output_name else None
 
     return {
         "message": "Property saved successfully",
         "property_name": payload.property_name,
         "total_records": total_registros,
         "output_file": caminho_gerado,
+        "output_url": output_url,
     }
 
 
