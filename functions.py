@@ -294,6 +294,50 @@ def _aplicar_formulas_monthly_cf_dinamicas(ws_monthly) -> None:
         ws_monthly.cell(row=73, column=coluna, value=formula_bl_ending_balance)
         ws_monthly.cell(row=74, column=coluna, value=formula_bl_total_debt_service)
 
+        rf_end_year = 'INDEX(Inputs!$C:$C,MATCH("End Year",Inputs!$B:$B,0))'
+        rf_year = 'INDEX(Inputs!$C:$C,MATCH("Refi Year",Inputs!$B:$B,0))'
+        rf_amount = 'INDEX(Inputs!$C:$C,MATCH("*Refi Loan Amount*",Inputs!$B:$B,0))'
+        rf_rate = 'INDEX(Inputs!$C:$C,MATCH("*Refi Interest Rate*",Inputs!$B:$B,0))'
+        rf_amort_years = 'INDEX(Inputs!$C:$C,MATCH("*Refi Amortization*",Inputs!$B:$B,0))'
+        rf_term_years = 'INDEX(Inputs!$C:$C,MATCH("*Refi Term*",Inputs!$B:$B,0))'
+        rf_io_period = 'INDEX(Inputs!$C:$C,MATCH("*Refi IO Period*",Inputs!$B:$B,0))'
+
+        # Debt Service - Refinance Loan
+        if coluna == 3:
+            formula_rf_beginning_balance = "0"
+        else:
+            formula_rf_beginning_balance = (
+                f'=IF({col}$3<={rf_end_year}*12,IF({col}$3<={rf_year}*12,0,{col_anterior}82),0)'
+            )
+
+        formula_rf_loan_funding = (
+            f'=IF({col}$3<={rf_end_year}*12,IF({col}$3={rf_year}*12+1,{rf_amount},0),0)'
+        )
+        formula_rf_interest_payment = (
+            f'=IF({col}$3<={rf_end_year}*12,IF({col}77=0,0,-{col}77*{rf_rate}/12),0)'
+        )
+        formula_rf_principal_payment = (
+            f'=IF({col}$3<={rf_end_year}*12,IF({col}77=0,0,'
+            f'IF({col}$3-{rf_year}*12<={rf_io_period},0,MIN(IFERROR(PMT({rf_rate}/12,{rf_amort_years}*12,-{rf_amount}),0)-{col}77*{rf_rate}/12,{col}77))),0)'
+        )
+        formula_rf_loan_payoff = (
+            f'=IF({col}$3<={rf_end_year}*12,IF(OR({col}$3=({rf_year}+{rf_term_years})*12,{col}$3={rf_end_year}*12),-MAX({col}77+{col}78-{col}80,0),0),0)'
+        )
+        formula_rf_ending_balance = (
+            f'=IF({col}$3<={rf_end_year}*12,MAX({col}77+{col}78-{col}80+{col}81,0),0)'
+        )
+        formula_rf_total_debt_service = (
+            f'=IF({col}$3<={rf_end_year}*12,{col}79-{col}80+{col}81,0)'
+        )
+
+        ws_monthly.cell(row=77, column=coluna, value=formula_rf_beginning_balance)
+        ws_monthly.cell(row=78, column=coluna, value=formula_rf_loan_funding)
+        ws_monthly.cell(row=79, column=coluna, value=formula_rf_interest_payment)
+        ws_monthly.cell(row=80, column=coluna, value=formula_rf_principal_payment)
+        ws_monthly.cell(row=81, column=coluna, value=formula_rf_loan_payoff)
+        ws_monthly.cell(row=82, column=coluna, value=formula_rf_ending_balance)
+        ws_monthly.cell(row=83, column=coluna, value=formula_rf_total_debt_service)
+
         # Comportamento antigo (distribuir em todos os meses ate End Year):
         # formula_due_diligence = f'=IF({col}$3<=Inputs!$C$15*12,-Inputs!$D$12,0)'
         # formula_loan_origination = f'=IF({col}$3<=Inputs!$C$15*12,-Inputs!$D$13,0)'
