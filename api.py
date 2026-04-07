@@ -1,3 +1,17 @@
+"""API HTTP para entrada de propriedades e geracao de planilhas.
+
+Fluxo principal:
+1) Recebe payload JSON da propriedade.
+2) Converte para formato tabular do contatos.xlsx.
+3) Persiste o registro no Excel de entrada.
+4) Aciona o pipeline de main.py para gerar arquivo final na pasta Output.
+5) Retorna caminho/URL do arquivo gerado.
+
+Abas impactadas indiretamente pela API:
+- Inputs, IncomeExpenses, Monthly CF, Quarterly CF, Annual CF, Summary e Equity Waterfall,
+  pois o endpoint chama processar_registro_por_indice.
+"""
+
 from __future__ import annotations
 
 from datetime import date
@@ -14,16 +28,19 @@ OUTPUT_DIR = Path("Output")
 
 
 class OtherIncomeItem(BaseModel):
+    """Representa um item adicional de receita enviado pelo cliente da API."""
     tipo: str = Field(..., description="Name/Type of Income Additional")
     valor: str = Field(..., description="Value of Income Additional")
 
 
 class OtherExpenseItem(BaseModel):
+    """Representa um item adicional de despesa enviado pelo cliente da API."""
     tipo: str = Field(..., description="Name/Type of Additional Expense")
     valor: str = Field(..., description="Value of Additional Expense")
 
 
 class PropertyPayload(BaseModel):
+    """Contrato de entrada da API para criar uma propriedade."""
     property_name: str
     property_type: str
     address: str = ""
@@ -59,6 +76,11 @@ class PropertyPayload(BaseModel):
 
 
 def _montar_registro(payload: PropertyPayload) -> dict:
+    """Converte payload HTTP para o schema de colunas do contatos.xlsx.
+
+Por que faz:
+- O pipeline de main.py espera nomes de colunas legados/especificos do Excel.
+    """
     registro = {
         "Property Name": payload.property_name,
         "Property Type": payload.property_type,
@@ -89,6 +111,7 @@ def _montar_registro(payload: PropertyPayload) -> dict:
         "Submitted": "No",
     }
 
+    # Serializa lista dinamica de receitas no padrao Other Income N Type/Amount.
     income_count = 0
     for item in payload.other_incomes:
         label = str(item.tipo).strip()
@@ -98,6 +121,7 @@ def _montar_registro(payload: PropertyPayload) -> dict:
             registro[f"Other Income {income_count} Type"] = label
             registro[f"Other Income {income_count} Amount"] = valor
 
+    # Serializa lista dinamica de despesas no padrao Other Expense N Type/Amount.
     expense_count = 0
     for item in payload.other_expenses:
         label = str(item.tipo).strip()
@@ -114,6 +138,11 @@ def _montar_registro(payload: PropertyPayload) -> dict:
 
 
 def _salvar_registro_no_excel(registro: dict) -> tuple[int, int]:
+    """Anexa registro ao contatos.xlsx e retorna (total_registros, novo_indice).
+
+Compatibilidade tratada:
+- Migra colunas legadas para nomes atuais quando necessario.
+    """
     novos_dados = pd.DataFrame([registro])
 
     if ARQUIVO_EXCEL.exists():
@@ -142,13 +171,14 @@ def _salvar_registro_no_excel(registro: dict) -> tuple[int, int]:
 
 app = FastAPI(title="SheetsForSaim API", version="1.0.0")
 
-# Ensures static route can be mounted even on a fresh deploy.
+# Garante que /outputs possa servir arquivos mesmo em deploy limpo.
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 app.mount("/outputs", StaticFiles(directory=str(OUTPUT_DIR)), name="outputs")
 
 
 @app.get("/")
 def root() -> dict:
+    """Endpoint de descoberta com status basico e mapa de endpoints."""
     return {
         "message": "SheetsForSaim API online",
         "endpoints": {
@@ -162,16 +192,25 @@ def root() -> dict:
 
 @app.head("/")
 def root_head() -> Response:
+    """HEAD de compatibilidade para health checks simples."""
     return Response(status_code=200)
 
 
 @app.get("/health")
 def health() -> dict:
+    """Health endpoint para monitoramento da API."""
     return {"status": "ok"}
 
 
 @app.post("/properties")
 def create_property(payload: PropertyPayload) -> dict:
+    """Cria propriedade, grava no contatos.xlsx e gera planilha final.
+
+O endpoint retorna:
+- total_records: quantidade total de registros no contatos.xlsx.
+- output_file: caminho do .xlsx gerado na Output.
+- output_url: rota estatica para download/consumo do arquivo gerado.
+    """
     if not payload.property_name or not payload.property_type:
         raise HTTPException(status_code=400, detail="property_name e property_type sao obrigatorios")
 
@@ -192,5 +231,5 @@ def create_property(payload: PropertyPayload) -> dict:
 
 @app.post("/")
 def create_property_root(payload: PropertyPayload) -> dict:
-    """Compatibility endpoint for clients posting to root path."""
+    """Endpoint de compatibilidade para clientes que fazem POST na raiz."""
     return create_property(payload)

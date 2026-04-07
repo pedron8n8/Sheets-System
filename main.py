@@ -1,10 +1,14 @@
-"""Input pipeline entrypoint.
+"""Pipeline de entrada de dados para gerar arquivos de analise.
 
-This file owns all input-side behavior:
-- Read pending rows from contatos.xlsx
-- Populate Inputs sheet values
-- Compact/remove unused rows for readability
-- Call formula engine after input changes
+Este arquivo e responsavel por:
+- Ler registros do contatos.xlsx.
+- Preencher abas do template: Inputs e IncomeExpenses.
+- Acionar o motor de formulas (functions.aplicar_formulas_apos_inputs), que atualiza
+    Monthly CF, Quarterly CF, Annual CF, Summary e Equity Waterfall.
+- Salvar o arquivo final em Output.
+
+Por que existe:
+- Centraliza o fluxo "dados tabulares -> workbook pronto" em um ponto unico.
 """
 
 from __future__ import annotations
@@ -22,14 +26,21 @@ from functions import aplicar_formulas_apos_inputs
 ARQUIVO_TEMPLATE = "InputTemplate.xlsx"
 ARQUIVO_DATA = "contatos.xlsx"
 PASTA_SAIDA = "Output"
+ABA_INCOME_EXPENSES = "IncomeExpenses"
+IE_INCOME_START = 7
+IE_INCOME_END = 46
+IE_EXPENSE_START = 50
+IE_EXPENSE_END = 89
 
 
 def garantir_pasta_saida(pasta_saida: str = PASTA_SAIDA) -> None:
+    """Garante que a pasta Output exista antes de salvar arquivos."""
     if not os.path.exists(pasta_saida):
         os.makedirs(pasta_saida)
 
 
 def _set_cell_value_respeitando_merge(sheet, cell_ref: str, value) -> None:
+    """Escreve celula respeitando merges (usa ancora superior esquerda)."""
     for merged_range in sheet.merged_cells.ranges:
         if cell_ref in merged_range:
             anchor_col = get_column_letter(merged_range.min_col)
@@ -40,6 +51,13 @@ def _set_cell_value_respeitando_merge(sheet, cell_ref: str, value) -> None:
 
 
 def _normalizar_percentual(valor):
+    """Normaliza entradas percentuais para formato decimal esperado pelo Excel.
+
+Exemplos:
+- 20 -> 0.20
+- "1,5%" -> 0.015
+- 0.2 -> 0.2
+    """
     if valor == "" or pd.isna(valor):
         return ""
 
@@ -88,12 +106,14 @@ def _normalizar_down_payment(valor_down_payment, valor_purchase_price):
 
 
 def _valor_limpo(valor):
+    """Converte NaN para string vazia para evitar sujeira no workbook."""
     if pd.isna(valor):
         return ""
     return valor
 
 
 def _to_float(valor) -> float:
+    """Converte valor heterogeneo para float (aceita simbolos e strings)."""
     if valor is None or valor == "" or pd.isna(valor):
         return 0.0
 
@@ -108,6 +128,12 @@ def _to_float(valor) -> float:
 
 
 def _extrair_other_incomes(primeira_linha):
+    """Extrai itens dinamicos de Other Income da linha do contatos.xlsx.
+
+Origem esperada de colunas:
+- Other Income N Type
+- Other Income N Amount
+    """
     other_incomes = []
     for coluna in primeira_linha.index:
         match = re.match(r"^Other Income\s+(\d+)\s+Type$", str(coluna))
@@ -125,6 +151,7 @@ def _extrair_other_incomes(primeira_linha):
 
 
 def _extrair_other_expenses(primeira_linha):
+    """Extrai itens dinamicos de Other Expense da linha do contatos.xlsx."""
     other_expenses = []
     for coluna in primeira_linha.index:
         match = re.match(r"^Other Expense\s+(\d+)\s+Type$", str(coluna))
@@ -142,6 +169,7 @@ def _extrair_other_expenses(primeira_linha):
 
 
 def _compactar_other_incomes(other_incomes, max_rows: int):
+    """Compacta excedentes de receitas em uma linha agregada quando necessario."""
     if len(other_incomes) <= max_rows:
         return other_incomes
 
@@ -154,6 +182,7 @@ def _compactar_other_incomes(other_incomes, max_rows: int):
 
 
 def _compactar_other_expenses(other_expenses, max_rows: int):
+    """Compacta excedentes de despesas em uma linha agregada quando necessario."""
     if len(other_expenses) <= max_rows:
         return other_expenses
 
@@ -166,11 +195,21 @@ def _compactar_other_expenses(other_expenses, max_rows: int):
 
 
 def criar_arquivo_baseado_em_template(primeira_linha) -> str:
-    """Populate Inputs sheet from one contatos row and then apply formula engine."""
+    """Preenche o template Excel a partir de um registro e gera o arquivo final.
+
+Abas envolvidas no preenchimento direto aqui:
+- Inputs: dados do imovel, compra, operacao e capex labels.
+- IncomeExpenses: lista de receitas/despesas detalhadas para lookup posterior.
+
+Abas atualizadas indiretamente:
+- Monthly CF, Quarterly CF, Annual CF, Summary e Equity Waterfall,
+  via aplicar_formulas_apos_inputs.
+    """
     garantir_pasta_saida(PASTA_SAIDA)
 
     wb = load_workbook(ARQUIVO_TEMPLATE, data_only=False)
     ws = wb["Inputs"]
+    ws_ie = wb[ABA_INCOME_EXPENSES]
 
     input_property_type = primeira_linha.get("Property Type", "")
     input_property_name = primeira_linha.get("Property Name", "")
@@ -206,6 +245,7 @@ def criar_arquivo_baseado_em_template(primeira_linha) -> str:
     other_incomes = _extrair_other_incomes(primeira_linha)
     other_expenses = _extrair_other_expenses(primeira_linha)
 
+    # Inputs (aba): metadados do ativo e premissas principais.
     _set_cell_value_respeitando_merge(ws, "C6", input_property_type)
     _set_cell_value_respeitando_merge(ws, "C5", input_property_name)
     _set_cell_value_respeitando_merge(ws, "C7", input_address)
@@ -218,59 +258,52 @@ def criar_arquivo_baseado_em_template(primeira_linha) -> str:
     _set_cell_value_respeitando_merge(ws, "C14", input_purchase_date)
     _set_cell_value_respeitando_merge(ws, "C15", input_end_year)
 
-    for row in range(20, 28):
-        _set_cell_value_respeitando_merge(ws, f"B{row}", "")
-        _set_cell_value_respeitando_merge(ws, f"C{row}", "")
+    _set_cell_value_respeitando_merge(ws, "C20", input_gpr)
+    _set_cell_value_respeitando_merge(ws, "C21", _normalizar_percentual(input_vacancy))
+    _set_cell_value_respeitando_merge(ws, "C22", _normalizar_percentual(input_credit_loss))
+    _set_cell_value_respeitando_merge(ws, "C28", _normalizar_percentual(input_management_fee))
 
-    fixed_revenues = [
-        ("Gross Potential Rent", input_gpr),
-        ("Vacancy Rate %", _normalizar_percentual(input_vacancy)),
-        ("Credit Loss %", _normalizar_percentual(input_credit_loss)),
-    ]
+    # IncomeExpenses (aba): limpa e reescreve bloco de receitas adicionais.
+    for row in range(IE_INCOME_START, IE_INCOME_END + 1):
+        ws_ie.cell(row=row, column=2, value="")
+        ws_ie.cell(row=row, column=3, value="")
 
-    revenue_row_cursor = 20
-    for nome_income, valor_income in fixed_revenues:
-        if revenue_row_cursor > 27:
-            break
-        _set_cell_value_respeitando_merge(ws, f"B{revenue_row_cursor}", nome_income)
-        _set_cell_value_respeitando_merge(ws, f"C{revenue_row_cursor}", valor_income)
-        revenue_row_cursor += 1
-
-    max_income_rows = max(0, 27 - revenue_row_cursor + 1)
-    other_incomes = _compactar_other_incomes(other_incomes, max_income_rows) if max_income_rows > 0 else []
+    row_cursor_ie_income = IE_INCOME_START
     for _, nome_income, valor_income in other_incomes:
-        _set_cell_value_respeitando_merge(ws, f"B{revenue_row_cursor}", nome_income)
-        _set_cell_value_respeitando_merge(ws, f"C{revenue_row_cursor}", valor_income)
-        revenue_row_cursor += 1
-
-    for row in range(32, 47):
-        _set_cell_value_respeitando_merge(ws, f"B{row}", "")
-        _set_cell_value_respeitando_merge(ws, f"C{row}", "")
+        if row_cursor_ie_income > IE_INCOME_END:
+            break
+        ws_ie.cell(row=row_cursor_ie_income, column=2, value=nome_income)
+        ws_ie.cell(row=row_cursor_ie_income, column=3, value=valor_income)
+        row_cursor_ie_income += 1
 
     fixed_expenses = [
         ("Property Tax", input_property_tax),
         ("Insurance", input_insurance),
-        ("Property Management Fee (%EGI)", _normalizar_percentual(input_management_fee)),
-        ("Repairs and Maintenance", input_repairs),
+        ("Repairs", input_repairs),
         ("Utilities", input_utilities),
         ("Capital Expenditures", input_capex_base),
-        ("Landscape and Janitorial", input_landscape),
+        ("Landscape", input_landscape),
     ]
 
-    row_cursor = 32
-    for nome_expense, valor_expense in fixed_expenses:
-        if row_cursor > 46:
-            break
-        _set_cell_value_respeitando_merge(ws, f"B{row_cursor}", nome_expense)
-        _set_cell_value_respeitando_merge(ws, f"C{row_cursor}", valor_expense)
-        row_cursor += 1
+    # IncomeExpenses (aba): limpa e reescreve bloco de despesas.
+    for row in range(IE_EXPENSE_START, IE_EXPENSE_END + 1):
+        ws_ie.cell(row=row, column=2, value="")
+        ws_ie.cell(row=row, column=3, value="")
 
-    max_dynamic_rows = max(0, 46 - row_cursor + 1)
-    other_expenses = _compactar_other_expenses(other_expenses, max_dynamic_rows) if max_dynamic_rows > 0 else []
+    row_cursor_ie_expense = IE_EXPENSE_START
+    for nome_expense, valor_expense in fixed_expenses:
+        if row_cursor_ie_expense > IE_EXPENSE_END:
+            break
+        ws_ie.cell(row=row_cursor_ie_expense, column=2, value=nome_expense)
+        ws_ie.cell(row=row_cursor_ie_expense, column=3, value=valor_expense)
+        row_cursor_ie_expense += 1
+
     for _, nome_expense, valor_expense in other_expenses:
-        _set_cell_value_respeitando_merge(ws, f"B{row_cursor}", nome_expense)
-        _set_cell_value_respeitando_merge(ws, f"C{row_cursor}", valor_expense)
-        row_cursor += 1
+        if row_cursor_ie_expense > IE_EXPENSE_END:
+            break
+        ws_ie.cell(row=row_cursor_ie_expense, column=2, value=nome_expense)
+        ws_ie.cell(row=row_cursor_ie_expense, column=3, value=valor_expense)
+        row_cursor_ie_expense += 1
 
     _set_cell_value_respeitando_merge(ws, "C51", input_capex1)
     _set_cell_value_respeitando_merge(ws, "C52", input_capex2)
@@ -279,11 +312,7 @@ def criar_arquivo_baseado_em_template(primeira_linha) -> str:
     _set_cell_value_respeitando_merge(ws, "C55", input_capex5)
     _set_cell_value_respeitando_merge(ws, "C56", input_capex6)
 
-    if row_cursor <= 46:
-        ws.delete_rows(row_cursor, 46 - row_cursor + 1)
-    if revenue_row_cursor <= 27:
-        ws.delete_rows(revenue_row_cursor, 27 - revenue_row_cursor + 1)
-
+    # Dispara o motor que recalcula formulas em todas as abas financeiras.
     aplicar_formulas_apos_inputs(wb, ws)
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -297,12 +326,14 @@ def criar_arquivo_baseado_em_template(primeira_linha) -> str:
 
 
 def obter_registros_pendentes(df_data: pd.DataFrame) -> pd.DataFrame:
+    """Filtra registros com Submitted = No para processamento."""
     if "Submitted" not in df_data.columns:
         df_data["Submitted"] = "No"
     return df_data[df_data["Submitted"].astype(str).str.strip().str.lower() == "no"].copy()
 
 
 def exibir_resumo_registro(registro) -> None:
+    """Mostra no console um resumo do registro antes da geracao do arquivo."""
     print(f"Property Type: {registro.get('Property Type', '')}")
     print(f"Property Name: {registro.get('Property Name', '')}")
     print(f"Address: {registro.get('Address', '')}")
@@ -325,6 +356,11 @@ def exibir_resumo_registro(registro) -> None:
 
 
 def processar_registro_por_indice(registro_index: int) -> str | None:
+    """Processa um registro especifico do contatos.xlsx pelo indice.
+
+Uso principal:
+- Chamado pela API apos inserir novo registro, para gerar o arquivo imediatamente.
+    """
     if not os.path.exists(ARQUIVO_DATA):
         print(f"Arquivo de dados nao encontrado: {ARQUIVO_DATA}")
         return None
@@ -351,6 +387,7 @@ def processar_registro_por_indice(registro_index: int) -> str | None:
 
 
 def processar_primeiro_registro_pendente() -> str | None:
+    """Processa o primeiro registro pendente encontrado no contatos.xlsx."""
     garantir_pasta_saida(PASTA_SAIDA)
 
     if not os.path.exists(ARQUIVO_DATA):
@@ -381,6 +418,7 @@ def processar_primeiro_registro_pendente() -> str | None:
 
 
 def main() -> None:
+    """Entrypoint CLI padrao: processa apenas o primeiro pendente."""
     processar_primeiro_registro_pendente()
 
 
