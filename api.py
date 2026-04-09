@@ -39,6 +39,40 @@ class OtherExpenseItem(BaseModel):
     valor: str = Field(..., description="Value of Additional Expense")
 
 
+class IncomesPayload(BaseModel):
+    """Bloco de receitas no novo contrato de entrada."""
+    gross_potential_rent: float = 0.0
+    vacancy_rate: float = 0.0
+    credit_loss: float = 0.0
+    other_incomes: list[OtherIncomeItem] = Field(default_factory=list)
+
+
+class ExpensesPayload(BaseModel):
+    """Bloco de despesas no novo contrato de entrada."""
+    property_tax: float = 0.0
+    insurance: float = 0.0
+    management_fee: float = 0.0
+    repairs_and_maintenance: float = 0.0
+    utilities: float = 0.0
+    capital_expenditures: float = 0.0
+    landscape_and_janitorial: float = 0.0
+
+    capex_1: str = ""
+    capex_2: str = ""
+    capex_3: str = ""
+    capex_4: str = ""
+    capex_5: str = ""
+
+    other_expenses: list[OtherExpenseItem] = Field(default_factory=list)
+
+
+class ValidationPayload(BaseModel):
+    """Bloco de validacao recebido de clientes que prevalidam o payload."""
+    is_valid: bool | None = None
+    missing_fields: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+
+
 class PropertyPayload(BaseModel):
     """Contrato de entrada da API para criar uma propriedade."""
     property_name: str
@@ -50,9 +84,10 @@ class PropertyPayload(BaseModel):
     down_payment: float = 0.0
     due_diligence_costs: float = 0.0
     loan_original_costs: float = 0.0
-    purchase_date: date
+    purchase_date: date | None = None
     end_year: int = 10
 
+    # Compatibilidade com payload antigo (campos no nivel raiz).
     gross_potential_rent: float = 0.0
     vacancy_rate: float = 0.0
     credit_loss: float = 0.0
@@ -71,8 +106,13 @@ class PropertyPayload(BaseModel):
     capex_4: str = ""
     capex_5: str = ""
 
-    other_incomes: list[OtherIncomeItem] = []
-    other_expenses: list[OtherExpenseItem] = []
+    other_incomes: list[OtherIncomeItem] = Field(default_factory=list)
+    other_expenses: list[OtherExpenseItem] = Field(default_factory=list)
+
+    # Novo contrato (campos agrupados).
+    incomes: IncomesPayload | None = None
+    expenses: ExpensesPayload | None = None
+    validation: ValidationPayload | None = None
 
 
 def _montar_registro(payload: PropertyPayload) -> dict:
@@ -81,6 +121,44 @@ def _montar_registro(payload: PropertyPayload) -> dict:
 Por que faz:
 - O pipeline de main.py espera nomes de colunas legados/especificos do Excel.
     """
+    income_block = payload.incomes
+    expense_block = payload.expenses
+
+    gross_potential_rent = (
+        income_block.gross_potential_rent
+        if income_block is not None
+        else payload.gross_potential_rent
+    )
+    vacancy_rate = income_block.vacancy_rate if income_block is not None else payload.vacancy_rate
+    credit_loss = income_block.credit_loss if income_block is not None else payload.credit_loss
+    other_incomes = income_block.other_incomes if income_block is not None else payload.other_incomes
+
+    property_tax = expense_block.property_tax if expense_block is not None else payload.property_tax
+    insurance = expense_block.insurance if expense_block is not None else payload.insurance
+    management_fee = expense_block.management_fee if expense_block is not None else payload.management_fee
+    repairs_and_maintenance = (
+        expense_block.repairs_and_maintenance
+        if expense_block is not None
+        else payload.repairs_and_maintenance
+    )
+    utilities = expense_block.utilities if expense_block is not None else payload.utilities
+    capital_expenditures = (
+        expense_block.capital_expenditures
+        if expense_block is not None
+        else payload.capital_expenditures
+    )
+    landscape_and_janitorial = (
+        expense_block.landscape_and_janitorial
+        if expense_block is not None
+        else payload.landscape_and_janitorial
+    )
+    capex_1 = expense_block.capex_1 if expense_block is not None else payload.capex_1
+    capex_2 = expense_block.capex_2 if expense_block is not None else payload.capex_2
+    capex_3 = expense_block.capex_3 if expense_block is not None else payload.capex_3
+    capex_4 = expense_block.capex_4 if expense_block is not None else payload.capex_4
+    capex_5 = expense_block.capex_5 if expense_block is not None else payload.capex_5
+    other_expenses = expense_block.other_expenses if expense_block is not None else payload.other_expenses
+
     registro = {
         "Property Name": payload.property_name,
         "Property Type": payload.property_type,
@@ -91,29 +169,29 @@ Por que faz:
         "Down Payment (%)": payload.down_payment,
         "Due Diligence Costs": payload.due_diligence_costs,
         "Loan Original Costs": payload.loan_original_costs,
-        "Purchase Date": payload.purchase_date,
+        "Purchase Date": payload.purchase_date or "",
         "End Year": int(payload.end_year),
-        "Gross Potential Rent": payload.gross_potential_rent,
-        "Vacancy Rate %": payload.vacancy_rate,
-        "Credit Loss %": payload.credit_loss,
-        "Property Tax": payload.property_tax,
-        "Insurance": payload.insurance,
-        "Management Fee %": payload.management_fee,
-        "Repairs and Maintenance": payload.repairs_and_maintenance,
-        "Utilities": payload.utilities,
-        "Capital Expenditures": payload.capital_expenditures,
-        "Landscape and Janitorial": payload.landscape_and_janitorial,
-        "CapEx 1": payload.capex_1,
-        "CapEx 2": payload.capex_2,
-        "CapEx 3": payload.capex_3,
-        "CapEx 4": payload.capex_4,
-        "CapEx 5": payload.capex_5,
+        "Gross Potential Rent": gross_potential_rent,
+        "Vacancy Rate %": vacancy_rate,
+        "Credit Loss %": credit_loss,
+        "Property Tax": property_tax,
+        "Insurance": insurance,
+        "Management Fee %": management_fee,
+        "Repairs and Maintenance": repairs_and_maintenance,
+        "Utilities": utilities,
+        "Capital Expenditures": capital_expenditures,
+        "Landscape and Janitorial": landscape_and_janitorial,
+        "CapEx 1": capex_1,
+        "CapEx 2": capex_2,
+        "CapEx 3": capex_3,
+        "CapEx 4": capex_4,
+        "CapEx 5": capex_5,
         "Submitted": "No",
     }
 
     # Serializa lista dinamica de receitas no padrao Other Income N Type/Amount.
     income_count = 0
-    for item in payload.other_incomes:
+    for item in other_incomes:
         label = str(item.tipo).strip()
         valor = str(item.valor).strip()
         if label and label != "Select..." and valor:
@@ -123,7 +201,7 @@ Por que faz:
 
     # Serializa lista dinamica de despesas no padrao Other Expense N Type/Amount.
     expense_count = 0
-    for item in payload.other_expenses:
+    for item in other_expenses:
         label = str(item.tipo).strip()
         valor = str(item.valor).strip()
         if label and label != "Select..." and valor:

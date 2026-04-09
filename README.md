@@ -132,43 +132,57 @@ Endpoint de compatibilidade. Aceita o mesmo payload de `POST /properties`.
 ```json
 {
   "property_name": "Teste API",
-  "property_type": "Multifamily",
-  "address": "123 Main St",
-  "city_and_state": "Miami, FL",
-  "number_of_units": 12,
-  "purchase_price": 300000,
+  "property_type": "Other",
+  "address": "N/A",
+  "city_and_state": "N/A",
+  "number_of_units": 1,
+  "purchase_price": 350000,
   "down_payment": 20,
-  "due_diligence_costs": 5000,
-  "loan_original_costs": 1.5,
-  "purchase_date": "2026-03-20",
+  "due_diligence_costs": 0,
+  "loan_original_costs": 0,
+  "purchase_date": "2024-05-27",
   "end_year": 10,
 
-  "gross_potential_rent": 72000,
-  "vacancy_rate": 5,
-  "credit_loss": 1,
+  "incomes": {
+    "gross_potential_rent": 809596,
+    "vacancy_rate": 5,
+    "credit_loss": 1,
+    "other_incomes": [
+      {"tipo": "Gift Shop and Vending Sales", "valor": "41368.12"}
+    ]
+  },
 
-  "property_tax": 9000,
-  "insurance": 2500,
-  "management_fee": 5,
-  "repairs_and_maintenance": 4000,
-  "utilities": 3500,
-  "capital_expenditures": 3000,
-  "landscape_and_janitorial": 1800,
+  "expenses": {
+    "property_tax": 5623.86,
+    "insurance": 0,
+    "management_fee": 8,
+    "repairs_and_maintenance": 7118.13,
+    "utilities": 76686.92,
+    "capital_expenditures": 0,
+    "landscape_and_janitorial": 0,
+    "capex_1": "0",
+    "capex_2": "0",
+    "capex_3": "0",
+    "capex_4": "0",
+    "capex_5": "0",
+    "other_expenses": [
+      {"tipo": "Advertising and Promotion", "valor": "6907.48"},
+      {"tipo": "Automobile Expense", "valor": "651.66"}
+    ]
+  },
 
-  "capex_1": "Roof",
-  "capex_2": "HVAC",
-  "capex_3": "",
-  "capex_4": "",
-  "capex_5": "",
-
-  "other_incomes": [
-    {"tipo": "Other Income - Parking", "valor": "2400"}
-  ],
-  "other_expenses": [
-    {"tipo": "Security / Access Control", "valor": "1200"}
-  ]
+  "validation": {
+    "is_valid": false,
+    "missing_fields": ["address", "city_and_state"],
+    "warnings": ["payload pre-validated externally"]
+  }
 }
 ```
+
+Observacao: a API continua aceitando o formato antigo com campos no nivel raiz
+(`gross_potential_rent`, `other_incomes`, `property_tax`, `other_expenses`, etc.).
+Quando os blocos `incomes` e `expenses` estiverem presentes, eles passam a ter
+prioridade no mapeamento para o `contatos.xlsx`.
 
 Resposta exemplo:
 
